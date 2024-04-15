@@ -24,7 +24,7 @@ import (
 type BodyEncodeFunc func(body any) (io.Reader, error)
 
 type Request struct {
-	*http.Client
+	client         *http.Client
 	url            string
 	method         string
 	headers        http.Header
@@ -96,7 +96,7 @@ func (r *Request) Call(ctx context.Context) *Response {
 	}
 	req.Header = r.headers
 	req.URL.RawQuery = r.queryValues.Encode()
-	resp, err := r.Client.Do(req)
+	resp, err := r.client.Do(req)
 	if err != nil {
 		response.err = err
 		return response

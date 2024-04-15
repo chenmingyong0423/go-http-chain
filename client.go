@@ -71,7 +71,7 @@ func (c *Client) Request(url, method string) *Request {
 		method:      method,
 		headers:     c.headers,
 		queryValues: c.queryValues,
-		Client:      c.client,
+		client:      c.client,
 	}
 }
 

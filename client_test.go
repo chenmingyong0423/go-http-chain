@@ -91,5 +91,5 @@ func compareRequest(t *testing.T, r *Request, method string, client *Client) {
 	require.Equal(t, method, r.method)
 	mapsEqual(t, r.headers, client.headers, false)
 	mapsEqual(t, r.queryValues, client.queryValues, false)
-	require.Equal(t, client.client, r.Client)
+	require.Equal(t, client.client, r.client)
 }
