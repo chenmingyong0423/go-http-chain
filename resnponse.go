@@ -35,17 +35,18 @@ func (r *Response) DecodeRespBody(dst any) error {
 	if r.err != nil {
 		return r.err
 	}
-	return DecodeRespBody(r.resp.Header.Get(HeaderContentType), r.resp.Body, dst)
+	return DecodeRespBody(r.resp, dst)
 }
 
-func DecodeRespBody(contentType string, body io.ReadCloser, dst any) error {
+func DecodeRespBody(resp *http.Response, dst any) error {
+	contentType := resp.Header.Get(HeaderContentType)
 	switch contentType {
 	case ContentTypeApplicationJSON, ContentTypeApplicationJSONCharacterUTF8:
-		return json.NewDecoder(body).Decode(dst)
+		return json.NewDecoder(resp.Body).Decode(dst)
 	case ContentTypeApplicationXML, ContentTypeApplicationXMLCharacterUTF8, ContentTypeTextXML, ContentTypeTextXMLCharacterUTF8:
-		return xml.NewDecoder(body).Decode(dst)
+		return xml.NewDecoder(resp.Body).Decode(dst)
 	case ContentTypeTextPlain, ContentTypeTextPlainCharacterUTF8:
-		bytes, err := io.ReadAll(body)
+		bytes, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return err
 		}
