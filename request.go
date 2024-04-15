@@ -21,8 +21,6 @@ import (
 	"net/url"
 )
 
-type BodyEncodeFunc func(body any) (io.Reader, error)
-
 type Request struct {
 	client         *http.Client
 	url            string

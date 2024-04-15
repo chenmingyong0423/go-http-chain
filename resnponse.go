@@ -16,6 +16,8 @@ package httpchain
 
 import (
 	"encoding/json"
+	"encoding/xml"
+	"fmt"
 	"io"
 	"net/http"
 )
@@ -33,11 +35,25 @@ func (r *Response) DecodeRespBody(dst any) error {
 	if r.err != nil {
 		return r.err
 	}
-	return DecodeRespBody(r.resp.Body, dst)
-}
+	contentType := r.resp.Header.Get(HeaderContentType)
+	switch contentType {
+	case ContentTypeApplicationJSON, ContentTypeApplicationJSONCharacterUTF8:
+		return json.NewDecoder(r.resp.Body).Decode(dst)
+	case ContentTypeApplicationXML, ContentTypeApplicationXMLCharacterUTF8, ContentTypeTextXML, ContentTypeTextXMLCharacterUTF8:
+		return xml.NewDecoder(r.resp.Body).Decode(dst)
+	case ContentTypeTextPlain, ContentTypeTextPlainCharacterUTF8:
+		bytes, err := io.ReadAll(r.resp.Body)
+		if err != nil {
+			return err
+		}
 
-func DecodeRespBody(body io.ReadCloser, dst any) error {
-	defer body.Close()
-	// todo 默认 json，后面可以让用户自定义 decoder
-	return json.NewDecoder(body).Decode(dst)
+		strPtr, ok := dst.(*string)
+		if !ok {
+			return fmt.Errorf("expected dst to be *string, but got %T", dst)
+		}
+		*strPtr = string(bytes)
+		return nil
+	default:
+		return &UnsupportedContentTypeError{ContentType: contentType}
+	}
 }

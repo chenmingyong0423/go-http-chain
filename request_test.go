@@ -18,7 +18,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
+	"fmt"
 	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
@@ -140,7 +142,41 @@ func TestRequest_Call(t *testing.T) {
 		var invalidUnmarshalError = &json.InvalidUnmarshalError{}
 		require.True(t, errors.As(err, &invalidUnmarshalError))
 	})
-
+	t.Run("test text/plain", func(t *testing.T) {
+		client := NewDefault()
+		getReq := client.AddHeader("X-Name", "陈明勇").
+			AddQuery("name", "陈明勇").Get("http://localhost:8080/test")
+		var result string
+		err := getReq.Call(context.Background()).DecodeRespBody(&result)
+		require.NoError(t, err)
+		require.Equal(t, result, "hello world")
+	})
+	t.Run("test text/plain error", func(t *testing.T) {
+		client := NewDefault()
+		getReq := client.AddHeader("X-Name", "陈明勇").
+			AddQuery("name", "陈明勇").Get("http://localhost:8080/test")
+		var result string
+		err := getReq.Call(context.Background()).DecodeRespBody(result)
+		require.Equal(t, err, fmt.Errorf("expected dst to be *string, but got string"))
+	})
+	t.Run("test application/xml", func(t *testing.T) {
+		client := NewDefault()
+		getReq := client.Get("http://localhost:8080/xml")
+		var result = struct {
+			Name string `xml:"name"`
+		}{}
+		err := getReq.Call(context.Background()).DecodeRespBody(&result)
+		require.NoError(t, err)
+		require.Equal(t, result, struct {
+			Name string `xml:"name"`
+		}{Name: "陈明勇"})
+	})
+	t.Run("test invalid content-type", func(t *testing.T) {
+		client := NewDefault()
+		getReq := client.Get("http://localhost:8080/invalid-ct")
+		err := getReq.Call(context.Background()).DecodeRespBody(nil)
+		require.Equal(t, err, &UnsupportedContentTypeError{ContentType: "xxx"})
+	})
 }
 
 func runWebServer(t *testing.T) {
@@ -172,13 +208,31 @@ func runWebServer(t *testing.T) {
 		result := map[string]any{"name": "陈明勇"}
 		data, err := json.Marshal(result)
 		require.NoError(t, err)
+		writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = writer.Write(data)
 	})
 	http.HandleFunc("DELETE /test", func(writer http.ResponseWriter, request *http.Request) {
 		result := map[string]any{"name": "陈明勇"}
 		data, err := json.Marshal(result)
 		require.NoError(t, err)
+		writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = writer.Write(data)
+	})
+	http.HandleFunc("GET /xml", func(writer http.ResponseWriter, request *http.Request) {
+		type XmlStruct struct {
+			Name string `xml:"name"`
+		}
+		result := XmlStruct{
+			Name: "陈明勇",
+		}
+		data, err := xml.Marshal(result)
+		require.NoError(t, err)
+		writer.Header().Set("Content-Type", "application/xml")
+		_, _ = writer.Write(data)
+	})
+	http.HandleFunc("GET /invalid-ct", func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "xxx")
+		_, _ = writer.Write(nil)
 	})
 	err := http.ListenAndServe(":8080", nil)
 	require.NoError(t, err)
