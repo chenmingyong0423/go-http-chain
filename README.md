@@ -23,11 +23,17 @@ go get github.com/chenmingyong0423/go-http-chain
 ```go
 // Create a new default client and set global Header parameters for the client
 client := httpchain.NewDefault().SetHeader("X-Global-Param", "go-http-chain")
-// Create a Request specifying a GET request and set Header parameters; the client's Headers and Query parameters will be passed to this Request
+// Create a Request specifying a GET request; the client's Headers and Query parameters will be passed to this Request
 // Retrieve the *http.Response
-resp, err := client.Get("localhost:8080/test").SetHeader("name", "Mingyong Chen").Call(context.Background()).Result()
+resp, err := client.Get("localhost:8080/test").
+		SetHeader("name", "Mingyong Chen").
+		SetQuery("name", "Mingyong Chen").
+		Call(context.Background()).Result()
 
 // Directly parse the response result into a specified struct
 var result map[string]any
-err = client.Get("localhost:8080/test").Call(context.Background()).DecodeRespBody(&result)
+err = client.Get("localhost:8080/test").
+		SetHeader("name", "Mingyong Chen").
+		SetQuery("name", "Mingyong Chen").
+		Call(context.Background()).DecodeRespBody(&result)
 ```
