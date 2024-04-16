@@ -16,6 +16,7 @@ package httpchain
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -70,6 +71,9 @@ func (r *Request) encodeBody() (io.Reader, error) {
 		return r.bodyBytes, nil
 	}
 	if r.body != nil {
+		if r.bodyEncodeFunc == nil {
+			return nil, errors.New("bodyEncodeFunc is nil while body is not nil")
+		}
 		body, err := r.bodyEncodeFunc(r.body)
 		if err != nil {
 			return nil, err
