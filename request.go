@@ -16,7 +16,6 @@ package httpchain
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -71,9 +70,6 @@ func (r *Request) encodeBody() (io.Reader, error) {
 		return r.bodyBytes, nil
 	}
 	if r.body != nil {
-		if r.bodyEncodeFunc == nil {
-			return nil, errors.New("bodyEncodeFunc is nil while body is not nil")
-		}
 		body, err := r.bodyEncodeFunc(r.body)
 		if err != nil {
 			return nil, err
@@ -97,7 +93,11 @@ func (r *Request) Call(ctx context.Context) *Response {
 		return response
 	}
 	req.Header = r.headers
-	req.URL.RawQuery = r.queryValues.Encode()
+	if req.URL.RawQuery == "" {
+		req.URL.RawQuery = r.queryValues.Encode()
+	} else {
+		req.URL.RawQuery += "&" + r.queryValues.Encode()
+	}
 	resp, err := r.client.Do(req)
 	if err != nil {
 		response.err = err

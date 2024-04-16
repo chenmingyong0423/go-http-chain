@@ -173,8 +173,8 @@ func TestRequest_Call(t *testing.T) {
 	})
 	t.Run("test invalid content-type", func(t *testing.T) {
 		client := NewDefault()
-		getReq := client.Get("http://localhost:8080/invalid-ct")
-		err := getReq.Call(context.Background()).DecodeRespBody(nil)
+		getReq := client.Get("http://localhost:8080/invalid-ct?name=陈明勇")
+		err := getReq.SetQuery("age", "18").Call(context.Background()).DecodeRespBody(nil)
 		require.Equal(t, err, &UnsupportedContentTypeError{ContentType: "xxx"})
 	})
 }
