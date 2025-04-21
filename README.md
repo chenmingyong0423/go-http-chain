@@ -28,12 +28,12 @@ client := httpchain.NewDefault().SetHeader("X-Global-Param", "go-http-chain")
 resp, err := client.Get("localhost:8080/test").
 		SetHeader("name", "Mingyong Chen").
 		SetQuery("name", "Mingyong Chen").
-		Call(context.Background()).Result()
+		Do(context.Background())
 
 // Directly parse the response result into a specified struct
 var result map[string]any
 err = client.Get("localhost:8080/test").
 		SetHeader("name", "Mingyong Chen").
 		SetQuery("name", "Mingyong Chen").
-		Call(context.Background()).DecodeRespBody(&result)
+		DoAndParse(context.Background(), &result)
 ```
