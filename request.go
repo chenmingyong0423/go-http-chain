@@ -16,6 +16,9 @@ package httpchain
 
 import (
 	"context"
+	"encoding/json"
+	"encoding/xml"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -80,17 +83,14 @@ func (r *Request) encodeBody() (io.Reader, error) {
 	return nil, nil
 }
 
-func (r *Request) Call(ctx context.Context) *Response {
-	response := new(Response)
+func (r *Request) Do(ctx context.Context) (*http.Response, error) {
 	body, err := r.encodeBody()
 	if err != nil {
-		response.err = err
-		return response
+		return nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, r.method, r.url, body)
 	if err != nil {
-		response.err = err
-		return response
+		return nil, err
 	}
 	req.Header = r.headers
 	if req.URL.RawQuery == "" {
@@ -98,11 +98,33 @@ func (r *Request) Call(ctx context.Context) *Response {
 	} else {
 		req.URL.RawQuery += "&" + r.queryValues.Encode()
 	}
-	resp, err := r.client.Do(req)
+	return r.client.Do(req)
+}
+
+func (r *Request) DoAndParse(ctx context.Context, dst any) error {
+	resp, err := r.Do(ctx)
 	if err != nil {
-		response.err = err
-		return response
+		return err
 	}
-	response.resp = resp
-	return response
+	contentType := resp.Header.Get(HeaderContentType)
+	switch contentType {
+	case ContentTypeApplicationJSON, ContentTypeApplicationJSONCharacterUTF8:
+		return json.NewDecoder(resp.Body).Decode(dst)
+	case ContentTypeApplicationXML, ContentTypeApplicationXMLCharacterUTF8, ContentTypeTextXML, ContentTypeTextXMLCharacterUTF8:
+		return xml.NewDecoder(resp.Body).Decode(dst)
+	case ContentTypeTextPlain, ContentTypeTextPlainCharacterUTF8:
+		bytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+
+		strPtr, ok := dst.(*string)
+		if !ok {
+			return fmt.Errorf("expected dst to be *string, but got %T", dst)
+		}
+		*strPtr = string(bytes)
+		return nil
+	default:
+		return &UnsupportedContentTypeError{ContentType: contentType}
+	}
 }
