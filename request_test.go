@@ -25,6 +25,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 )
@@ -56,17 +57,19 @@ func TestRequest(t *testing.T) {
 	require.Equal(t, r.bodyBytes, &bytes.Buffer{})
 }
 
-func TestRequest_Call(t *testing.T) {
+func TestRequest_Do(t *testing.T) {
 	// 启动一个 web 服务器
 	go runWebServer(t)
+
 	time.Sleep(500 * time.Millisecond)
 	t.Run("test GET", func(t *testing.T) {
 		client := NewDefault()
 		getReq := client.AddHeader("X-Name", "陈明勇").
 			AddQuery("name", "陈明勇").Get("http://localhost:8080/test")
-		resp := getReq.Call(context.Background())
-		require.Equal(t, resp.resp.StatusCode, 200)
-		body, err := io.ReadAll(resp.resp.Body)
+		resp, err := getReq.Do(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, resp.StatusCode, 200)
+		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
 		require.Equal(t, string(body), "hello world")
 	})
@@ -79,13 +82,101 @@ func TestRequest_Call(t *testing.T) {
 			}
 			return bytes.NewReader(data), nil
 		})
-		resp, err := postReq.Call(context.Background()).Result()
+		resp, err := postReq.Do(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, resp.StatusCode, 200)
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
 		require.Equal(t, string(body), "hello world")
 	})
+
+	t.Run("test request error", func(t *testing.T) {
+		client := NewDefault()
+
+		deleteReq := client.Delete("http://localhost:8080/test")
+		resp, err := deleteReq.Do(nil)
+		require.Nil(t, resp)
+		require.Equal(t, err, errors.New("net/http: nil Context"))
+	})
+	t.Run("test Do error", func(t *testing.T) {
+		client := NewDefault()
+
+		deleteReq := client.Delete("")
+		resp, err := deleteReq.Do(context.Background())
+		require.Nil(t, resp)
+		var urlErr = &url.Error{}
+		require.True(t, errors.As(err, &urlErr))
+	})
+
+}
+
+var once sync.Once
+
+func runWebServer(t *testing.T) {
+	once.Do(func() {
+		http.HandleFunc("GET /test", func(writer http.ResponseWriter, request *http.Request) {
+			mapsEqual(t, http.Header{
+				"X-Name": {"陈明勇"},
+			}, request.Header, true)
+			mapsEqual(t, request.URL.Query(), url.Values{
+				"name": {"陈明勇"},
+			}, true)
+			_, _ = writer.Write([]byte("hello world"))
+		})
+		http.HandleFunc("POST /test", func(writer http.ResponseWriter, request *http.Request) {
+			body, err := io.ReadAll(request.Body)
+			require.NoError(t, err)
+			mp := make(map[string]string)
+			err = json.Unmarshal(body, &mp)
+			require.NoError(t, err)
+			require.Equal(t, mp, map[string]string{"name": "陈明勇"})
+			_, _ = writer.Write([]byte("hello world"))
+		})
+		http.HandleFunc("PUT /test", func(writer http.ResponseWriter, request *http.Request) {
+			body, err := io.ReadAll(request.Body)
+			require.NoError(t, err)
+			mp := make(map[string]string)
+			err = json.Unmarshal(body, &mp)
+			require.NoError(t, err)
+			require.Equal(t, mp, map[string]string{"name": "陈明勇"})
+			result := map[string]any{"name": "陈明勇"}
+			data, err := json.Marshal(result)
+			require.NoError(t, err)
+			writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_, _ = writer.Write(data)
+		})
+		http.HandleFunc("DELETE /test", func(writer http.ResponseWriter, request *http.Request) {
+			result := map[string]any{"name": "陈明勇"}
+			data, err := json.Marshal(result)
+			require.NoError(t, err)
+			writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_, _ = writer.Write(data)
+		})
+		http.HandleFunc("GET /xml", func(writer http.ResponseWriter, request *http.Request) {
+			type XmlStruct struct {
+				Name string `xml:"name"`
+			}
+			result := XmlStruct{
+				Name: "陈明勇",
+			}
+			data, err := xml.Marshal(result)
+			require.NoError(t, err)
+			writer.Header().Set("Content-Type", "application/xml")
+			_, _ = writer.Write(data)
+		})
+		http.HandleFunc("GET /invalid-ct", func(writer http.ResponseWriter, request *http.Request) {
+			writer.Header().Set("Content-Type", "xxx")
+			_, _ = writer.Write(nil)
+		})
+		err := http.ListenAndServe(":8080", nil)
+		require.NoError(t, err)
+	})
+}
+
+func TestRequest_DoAndParse(t *testing.T) {
+	// 启动一个 web 服务器
+	go runWebServer(t)
+
 	t.Run("test PUT", func(t *testing.T) {
 		client := NewDefault()
 		// 创建一个 map
@@ -102,10 +193,11 @@ func TestRequest_Call(t *testing.T) {
 
 		putReq := client.Put("http://localhost:8080/test").SetBody(buffer)
 		var result map[string]any
-		err = putReq.Call(context.Background()).DecodeRespBody(&result)
+		err = putReq.DoAndParse(context.Background(), &result)
 		require.NoError(t, err)
 		require.Equal(t, result, map[string]any{"name": "陈明勇"})
 	})
+
 	t.Run("test encodeBody error", func(t *testing.T) {
 		client := NewDefault()
 
@@ -115,57 +207,45 @@ func TestRequest_Call(t *testing.T) {
 			return nil, errors.New("encode error")
 		})
 		var result map[string]any
-		err := putReq.Call(context.Background()).DecodeRespBody(&result)
+		err := putReq.DoAndParse(context.Background(), &result)
 		require.Equal(t, err, errors.New("encode error"))
 	})
-	t.Run("test request error", func(t *testing.T) {
-		client := NewDefault()
 
-		deleteReq := client.Delete("http://localhost:8080/test")
-		resp := deleteReq.Call(nil)
-		require.Equal(t, resp.err, errors.New("net/http: nil Context"))
-	})
-	t.Run("test Do error", func(t *testing.T) {
-		client := NewDefault()
-
-		deleteReq := client.Delete("")
-		resp, err := deleteReq.Call(context.Background()).Result()
-		require.Nil(t, resp)
-		var urlErr = &url.Error{}
-		require.True(t, errors.As(err, &urlErr))
-	})
 	t.Run("test decodeBody error", func(t *testing.T) {
 		client := NewDefault()
 
 		deleteReq := client.Delete("http://localhost:8080/test")
-		err := deleteReq.Call(context.Background()).DecodeRespBody(nil)
+		err := deleteReq.DoAndParse(context.Background(), nil)
 		var invalidUnmarshalError = &json.InvalidUnmarshalError{}
 		require.True(t, errors.As(err, &invalidUnmarshalError))
 	})
+
 	t.Run("test text/plain", func(t *testing.T) {
 		client := NewDefault()
 		getReq := client.AddHeader("X-Name", "陈明勇").
 			AddQuery("name", "陈明勇").Get("http://localhost:8080/test")
 		var result string
-		err := getReq.Call(context.Background()).DecodeRespBody(&result)
+		err := getReq.DoAndParse(context.Background(), &result)
 		require.NoError(t, err)
 		require.Equal(t, result, "hello world")
 	})
+
 	t.Run("test text/plain error", func(t *testing.T) {
 		client := NewDefault()
 		getReq := client.AddHeader("X-Name", "陈明勇").
 			AddQuery("name", "陈明勇").Get("http://localhost:8080/test")
 		var result string
-		err := getReq.Call(context.Background()).DecodeRespBody(result)
+		err := getReq.DoAndParse(context.Background(), result)
 		require.Equal(t, err, fmt.Errorf("expected dst to be *string, but got string"))
 	})
+
 	t.Run("test application/xml", func(t *testing.T) {
 		client := NewDefault()
 		getReq := client.Get("http://localhost:8080/xml")
 		var result = struct {
 			Name string `xml:"name"`
 		}{}
-		err := getReq.Call(context.Background()).DecodeRespBody(&result)
+		err := getReq.DoAndParse(context.Background(), &result)
 		require.NoError(t, err)
 		require.Equal(t, result, struct {
 			Name string `xml:"name"`
@@ -174,66 +254,7 @@ func TestRequest_Call(t *testing.T) {
 	t.Run("test invalid content-type", func(t *testing.T) {
 		client := NewDefault()
 		getReq := client.Get("http://localhost:8080/invalid-ct?name=陈明勇")
-		err := getReq.SetQuery("age", "18").Call(context.Background()).DecodeRespBody(nil)
+		err := getReq.SetQuery("age", "18").DoAndParse(context.Background(), nil)
 		require.Equal(t, err, &UnsupportedContentTypeError{ContentType: "xxx"})
 	})
-}
-
-func runWebServer(t *testing.T) {
-	http.HandleFunc("GET /test", func(writer http.ResponseWriter, request *http.Request) {
-		mapsEqual(t, http.Header{
-			"X-Name": {"陈明勇"},
-		}, request.Header, true)
-		mapsEqual(t, request.URL.Query(), url.Values{
-			"name": {"陈明勇"},
-		}, true)
-		_, _ = writer.Write([]byte("hello world"))
-	})
-	http.HandleFunc("POST /test", func(writer http.ResponseWriter, request *http.Request) {
-		body, err := io.ReadAll(request.Body)
-		require.NoError(t, err)
-		mp := make(map[string]string)
-		err = json.Unmarshal(body, &mp)
-		require.NoError(t, err)
-		require.Equal(t, mp, map[string]string{"name": "陈明勇"})
-		_, _ = writer.Write([]byte("hello world"))
-	})
-	http.HandleFunc("PUT /test", func(writer http.ResponseWriter, request *http.Request) {
-		body, err := io.ReadAll(request.Body)
-		require.NoError(t, err)
-		mp := make(map[string]string)
-		err = json.Unmarshal(body, &mp)
-		require.NoError(t, err)
-		require.Equal(t, mp, map[string]string{"name": "陈明勇"})
-		result := map[string]any{"name": "陈明勇"}
-		data, err := json.Marshal(result)
-		require.NoError(t, err)
-		writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_, _ = writer.Write(data)
-	})
-	http.HandleFunc("DELETE /test", func(writer http.ResponseWriter, request *http.Request) {
-		result := map[string]any{"name": "陈明勇"}
-		data, err := json.Marshal(result)
-		require.NoError(t, err)
-		writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_, _ = writer.Write(data)
-	})
-	http.HandleFunc("GET /xml", func(writer http.ResponseWriter, request *http.Request) {
-		type XmlStruct struct {
-			Name string `xml:"name"`
-		}
-		result := XmlStruct{
-			Name: "陈明勇",
-		}
-		data, err := xml.Marshal(result)
-		require.NoError(t, err)
-		writer.Header().Set("Content-Type", "application/xml")
-		_, _ = writer.Write(data)
-	})
-	http.HandleFunc("GET /invalid-ct", func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Content-Type", "xxx")
-		_, _ = writer.Write(nil)
-	})
-	err := http.ListenAndServe(":8080", nil)
-	require.NoError(t, err)
 }
